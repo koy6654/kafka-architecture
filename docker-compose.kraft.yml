@@ -1,0 +1,171 @@
+version: "3.8"
+
+# ------------------------------------------------------------
+# Kafka Broker Common Config (KRaft)
+# ------------------------------------------------------------
+x-kafka-broker-environment: &kafka-broker-environment
+  CLUSTER_ID: "8hfLpvRrIVKfjyDbhM6e4g" # Kafka Broker들을 하나의 Cluster ID 로 묶어줌 (22글자 제한)
+  KAFKA_PROCESS_ROLES: "broker,controller" # Kafka Broker 투잡 처리
+
+  # CONTROLLER:	관리자 통로 - 브로커끼리 리더를 뽑고 클러스터를 유지할 때 사용
+  # PLAINTEXT: 일반 통로 - 브로커들끼리 데이터를 서로 복제할 때 사용
+  # PLAINTEXT_HOST: 손님 통로 - 타 서비스가 데이터를 보내려고 찾아오는 통로 (외부 포트)
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT" # Kafka가 알아들을 수 있는 4가지 프로토콜과 커스텀 네이밍을 매핑한다.
+  KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+  # 클러스터가 시작될 때, 이 명단을 보고 접속을 시도하여 Raft 합의 알고리즘(Quorum)을 돌려서 브로커 리더를 선출함 (과반수가 살아있어야 클러스터가 켜짐)
+  # 형식은 다음과 같다. [KAFKA_CFG_NODE_ID]@[docker-compose 명령어 타겟][각 브로커의 CONTROLLER 포트]
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-broker-1:9091,2@kafka-broker-2:9091,3@kafka-broker-3:9091"
+
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3 # Kafka Offset을 몇개의 브로커에서 저장할지 지정 (안정성을 위해 브로커 개수만큼 설정)
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3 # Kafka의 트랜잭션 원리에서 Coordinator 장부(__transaction_state)를 몇 개의 브로커에 복제해서 저장할지 결정 (안정성을 위해 브로커 개수만큼 설정)
+
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2 # Kafka 트랜잭션 발송 시, Coordinator가 장부를 기록할 때, 최소 몇 대의 Broker가 '저장 완료'라고 응답해야 하는가를 정하는 기준값 (= Math.floor(브로커 개수/2) + 1)
+  KAFKA_MIN_INSYNC_REPLICAS: 2 # Kafka 일반 발송 시, 데이터 유실을 방지하기 위해, 최소 몇 대의 Broker가 '저장 완료'라고 응답해야 하는가를 정하는 기준값 (= Math.floor(브로커 개수/2) + 1)
+
+  KAFKA_NUM_PARTITIONS: 3 # 토픽 생성 시 파티션 개수를 명시하지 않았거나 자동 생성될 때 적용되는 파티션 개수의 기본값
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # 존재하지 않는 토픽에 메시지를 보냈을 때 브로커가 알아서 토픽을 만들지 결정하는 허용 스위치 (현재는 개발용이기에 true)
+  KAFKA_LOG_DIRS: "/tmp/kafka-logs" # Kafka 브로커 별 로그 창고
+  KAFKA_HEAP_OPTS: "-Xms1G -Xmx1G" # Kafka 브로커 별 메모리 용량
+
+x-kafka-broker-base: &kafka-broker-base
+  image: confluentinc/cp-kafka:7.6.0
+  networks:
+    - kafka-network
+  restart: always
+  # [실무보완 2] 헬스체크 설정 (컨테이너 상태 감시)
+  healthcheck:
+    test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
+services:
+  kafka-broker-1:
+    <<: *kafka-broker-base
+    hostname: kafka-broker-1
+    container_name: kafka-broker-1
+    ports:
+      - "9092:9092"
+    environment:
+      <<: *kafka-broker-environment
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: "CONTROLLER://kafka-broker-1:9091,PLAINTEXT://kafka-broker-1:29092,PLAINTEXT_HOST://0.0.0.0:9092" # "Broker가 통신을 받기 위해 특정 포트들을 실제로 열고 대기하는 '수신 창구'
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-broker-1:29092,PLAINTEXT_HOST://localhost:9092" # "클라이언트가 나(Broker)를 찾아올 수 있도록, Broker 가 메타데이터에 담아 건네주는 '논리적 공식 명함'
+      # TODO: 0.0.0.0, localhost 는 개발용
+    volumes:
+      - ./tmp/kafka-logs/kafka-broker-1:/tmp/kafka-logs
+    healthcheck:
+      test:
+        ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka-broker-2:
+    <<: *kafka-broker-base
+    hostname: kafka-broker-2
+    container_name: kafka-broker-2
+    ports:
+      - "9093:9093"
+    environment:
+      <<: *kafka-broker-environment
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: "CONTROLLER://kafka-broker-2:9091,PLAINTEXT://kafka-broker-2:29092,PLAINTEXT_HOST://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-broker-2:29092,PLAINTEXT_HOST://localhost:9093"
+    volumes:
+      - ./tmp/kafka-logs/kafka-broker-2:/tmp/kafka-logs
+    healthcheck:
+      test:
+        ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9093 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka-broker-3:
+    <<: *kafka-broker-base
+    hostname: kafka-broker-3
+    container_name: kafka-broker-3
+    ports:
+      - "9094:9094"
+    environment:
+      <<: *kafka-broker-environment
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: "CONTROLLER://kafka-broker-3:9091,PLAINTEXT://kafka-broker-3:29092,PLAINTEXT_HOST://0.0.0.0:9094"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-broker-3:29092,PLAINTEXT_HOST://localhost:9094"
+    volumes:
+      - ./tmp/kafka-logs/kafka-broker-3:/tmp/kafka-logs
+    healthcheck:
+      test:
+        ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9094 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+#   # ------------------------------------------------------------
+#   # 2. Kafka Connect (Debezium 이미지 사용 - Best Practice)
+#   # ------------------------------------------------------------
+#   kafka-connect:
+#     image: debezium/connect:2.5
+#     hostname: connect
+#     container_name: connect
+#     depends_on:
+#       - broker
+#       - postgres
+#     ports:
+#       - "8083:8083"
+#     environment:
+#       BOOTSTRAP_SERVERS: broker:29092
+#       GROUP_ID: 1
+#       CONFIG_STORAGE_TOPIC: my_connect_configs
+#       OFFSET_STORAGE_TOPIC: my_connect_offsets
+#       STATUS_STORAGE_TOPIC: my_connect_statuses
+#       # 중요: Key/Value 컨버터 설정 (JSON 사용 시)
+#       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+#       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+#       # 스키마 레지스트리 없으므로 스키마 포함 여부 설정
+#       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+#       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+#     networks:
+#       - kafka-network
+
+#   # ------------------------------------------------------------
+#   # 3. PostgreSQL (Service A & B Database)
+#   # ------------------------------------------------------------
+#   postgres:
+#     image: postgres:16-alpine
+#     container_name: postgres
+#     ports:
+#       - "5432:5432"
+#     environment:
+#       POSTGRES_USER: user
+#       POSTGRES_PASSWORD: password
+#     # [핵심] wal_level을 logical로 켜서 실행
+#     command: ["postgres", "-c", "wal_level=logical"]
+#     volumes:
+#       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+#     networks:
+#       - kafka-network
+
+#   # ------------------------------------------------------------
+#   # 4. Kafka UI (모니터링용 - 선택사항이지만 강력 추천)
+#   # ------------------------------------------------------------
+#   kafka-ui:
+#     image: provectuslabs/kafka-ui:latest
+#     container_name: kafka-ui
+#     ports:
+#       - "8080:8080"
+#     depends_on:
+#       - broker
+#       - connect
+#     environment:
+#       KAFKA_CLUSTERS_0_NAME: local
+#       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker:29092
+#       KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+#       KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+#     networks:
+#       - kafka-network
+
+networks:
+  kafka-network:
+    driver: bridge
