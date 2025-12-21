@@ -98,4 +98,64 @@ echo -e "\n\n--- 7. 테스트 토픽 삭제 (청소) ---"
 docker exec -it $SURVIVOR kafka-topics --delete --bootstrap-server $SURVIVOR:29092 --topic $TARGET_TOPIC
 echo "청소 완료!"
 
+
+echo -e "\n\n"
+echo "===== Kafka Connect 연동 및 상태 테스트 시작 ====="
+CONNECT_HOST="localhost"
+CONNECT_PORT="8083"
+CONNECT_URL="http://$CONNECT_HOST:$CONNECT_PORT"
+
+# 1. [대기] Kafka Connect가 완전히 뜰 때까지 기다림 (Polling)
+echo "--- 1. Kafka Connect 실행 대기 (Health Check) ---"
+echo "Connect 서버($CONNECT_URL)가 응답할 때까지 대기합니다..."
+
+MAX_RETRIES=30
+COUNT=0
+
+while true; do
+  # HTTP 상태 코드만 가져옴 (200이면 성공)
+  STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $CONNECT_URL)
+  
+  if [ "$STATUS_CODE" == "200" ]; then
+    echo "Kafka Connect가 정상적으로 실행되었습니다! (HTTP 200)"
+    break
+  fi
+
+  COUNT=$((COUNT+1))
+  if [ $COUNT -ge $MAX_RETRIES ]; then
+    echo "Kafka Connect 실행 시간 초과! 로그를 확인해주세요."
+    echo "힌트: docker logs kafka-connect-1"
+    exit 1
+  fi
+
+  printf "."
+  sleep 2
+done
+
+# 2. [버전 확인] Connect 버전 정보 조회
+echo -e "\n\n--- 2. Kafka Connect 버전 정보 ---"
+curl -s $CONNECT_URL | grep "version"
+# jq가 설치되어 있다면 아래 명령어가 더 예쁘게 나옵니다.
+# curl -s $CONNECT_URL | jq .
+
+# 3. [플러그인 확인] 설치된 커넥터 플러그인 목록 조회 (Debezium 등 확인)
+echo -e "\n\n--- 3. 설치된 Connector Plugin 목록 확인 ---"
+# Debezium 이미지라면 여기에 PostgresConnector 등이 보여야 함
+RESPONSE=$(curl -s $CONNECT_URL/connector-plugins)
+echo $RESPONSE
+
+# 간단히 성공 여부 텍스트 판별
+if [[ "$RESPONSE" == *"PostgresConnector"* ]]; then
+  echo -e "\nDebezium PostgresConnector가 감지되었습니다."
+else
+  echo -e "\n주의: PostgresConnector가 보이지 않습니다. 플러그인 경로를 확인하세요."
+fi
+
+# 4. [내부 토픽 점검] Kafka Connect가 Kafka 브로커와 통신하여 생성한 내부 토픽 확인
+echo -e "\n\n--- 4. Kafka Connect 시스템 토픽 생성 여부 확인 ---"
+# kafka-connect-configs, offsets, status 토픽이 있어야 Connect가 정상 작동 중인 것임
+docker exec -it kafka-broker-1 kafka-topics --list --bootstrap-server $BOOTSTRAP_SERVER | grep "kafka-connect"
+
+echo -e "\n\nKafka Connect 테스트 완료."
+
 echo -e "\n\n테스트가 전부 완료되었습니다."

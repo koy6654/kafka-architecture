@@ -1,7 +1,5 @@
-version: "3.8"
-
 # ------------------------------------------------------------
-# Kafka Broker Common Config (KRaft)
+# Kafka Cluster (KRaft)
 # ------------------------------------------------------------
 x-kafka-broker-environment: &kafka-broker-environment
   CLUSTER_ID: "8hfLpvRrIVKfjyDbhM6e4g" # Kafka Broker들을 하나의 Cluster ID 로 묶어줌 (22글자 제한)
@@ -34,7 +32,6 @@ x-kafka-broker-base: &kafka-broker-base
   networks:
     - kafka-network
   restart: always
-  # [실무보완 2] 헬스체크 설정 (컨테이너 상태 감시)
   healthcheck:
     test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
     interval: 10s
@@ -102,32 +99,51 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-#   # ------------------------------------------------------------
-#   # 2. Kafka Connect (Debezium 이미지 사용 - Best Practice)
-#   # ------------------------------------------------------------
-#   kafka-connect:
-#     image: debezium/connect:2.5
-#     hostname: connect
-#     container_name: connect
-#     depends_on:
-#       - broker
-#       - postgres
-#     ports:
-#       - "8083:8083"
-#     environment:
-#       BOOTSTRAP_SERVERS: broker:29092
-#       GROUP_ID: 1
-#       CONFIG_STORAGE_TOPIC: my_connect_configs
-#       OFFSET_STORAGE_TOPIC: my_connect_offsets
-#       STATUS_STORAGE_TOPIC: my_connect_statuses
-#       # 중요: Key/Value 컨버터 설정 (JSON 사용 시)
-#       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-#       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-#       # 스키마 레지스트리 없으므로 스키마 포함 여부 설정
-#       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
-#       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
-#     networks:
-#       - kafka-network
+
+  # ------------------------------------------------------------
+  # 2. Kafka Connect (Debezium 이미지 사용 - Best Practice)
+  # ------------------------------------------------------------
+  kafka-connect-1:
+    image: debezium/connect:2.5
+    hostname: kafka-connect-1
+    container_name: kafka-connect-1
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_healthy
+      kafka-broker-3:
+        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      GROUP_ID: kafka-connect-group-1
+      BOOTSTRAP_SERVERS: kafka-broker-1:29092,kafka-broker-2:29092,kafka-broker-3:29092 # Kafka Cluster 값 참고
+
+      # 동일 CONNECT_GROUP_ID 내의 다른 워커들이 찾아올 수 있는 현재 Kafka Connect 워커의 주소
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect-1
+      CONNECT_REST_PORT: 8083
+
+      # Kafka Connect 운영을 위한 시스템 토픽 설정
+      CONFIG_STORAGE_TOPIC: kafka-connect-configs # Kafka Connect의 모든 설정 정보를 저장하는 중앙 저장소
+      OFFSET_STORAGE_TOPIC: kafka-connect-offsets # Kafka Connect가 읽고 있는 데이터의 위치 정보를 저장
+      STATUS_STORAGE_TOPIC: kafka-connect-status # Kafka Connect의 현재 생사 확인 및 상태를 공유
+      CONFIG_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
+      OFFSET_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
+      STATUS_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
+      CONNECT_CONFIG_STORAGE_PARTITIONS: 1 # 커넥터의 설정 정보를 저장하는 토픽의 파티션 개수 (설정 변경의 순서 보장을 위해 1로 지정 필수)
+      CONNECT_OFFSET_STORAGE_PARTITIONS: 25 # Source Connector가 데이터를 어디까지 읽었는지 Offset을 기록하는 토픽의 파티션 개수 (시스템 토픽 설정을 위해 파티션 수를 별도로 지정)
+      CONNECT_STATUS_STORAGE_PARTITIONS: 5 # Connector와 Task들의 상태를 저장하는 토픽의 파티션 개수 (시스템 토픽 설정을 위해 파티션 수를 별도로 지정)
+
+      # Kafka Connect를 통하는 데이터(ConnectRecord) 컨버터 정의
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter # ConnectRecord의 Key(식별자)를 어떤 형태로 직렬화해서 토픽에 저장할지 결정
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter # ConnectRecord의 Value(데이터 본문)를 어떤 형태로 직렬화하여 토픽에 저장할지 결정
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false" # 직렬화된 Key에 스키마 구조 정보(Metadata)를 포함할지 여부
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false" # 직렬화된 Value에 스키마 구조 정보(Metadata)를 포함할지 여부
+    networks:
+      - kafka-network
 
 #   # ------------------------------------------------------------
 #   # 3. PostgreSQL (Service A & B Database)
@@ -148,7 +164,7 @@ services:
 #       - kafka-network
 
 #   # ------------------------------------------------------------
-#   # 4. Kafka UI (모니터링용 - 선택사항이지만 강력 추천)
+#   # 4. Kafka UI
 #   # ------------------------------------------------------------
 #   kafka-ui:
 #     image: provectuslabs/kafka-ui:latest

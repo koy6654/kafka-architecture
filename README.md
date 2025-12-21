@@ -1,5 +1,11 @@
 # Kafka Architecture (with KRaft)
 
+이벤트 중심의 MSA 아키텍처를 위한 Kafka 설계
+
+(For OceansLab)
+
+<br />
+
 ## 실행 방법
 
 ```
@@ -11,7 +17,7 @@ docker compose -f docker-compose.kraft.yml up -d
 ## 테스트 방법
 
 ```
-./test.sh
+./scripts/test.sh
 ```
 
 <br />
@@ -48,7 +54,7 @@ docker compose -f docker-compose.kraft.yml up -d
 
 ## 그 외에 정리한 Kafka 지식들
 
-[![Kafka Reference Image](/kafka_reference_image.png)]()
+[![Kafka Reference Image](/assets/kafka_reference_image.png)]()
 <br> 출처: [Velog 기술 블로그](https://velog.io/@jwpark06/Kafka-%EC%8B%9C%EC%8A%A4%ED%85%9C-%EA%B5%AC%EC%A1%B0-%EC%95%8C%EC%95%84%EB%B3%B4%EA%B8%B0)
 
 <br />
@@ -78,6 +84,8 @@ docker compose -f docker-compose.kraft.yml up -d
 역할: 컨슈머 그룹의 '반장'입니다.
 
 상세: 컨슈머 그룹 내의 컨슈머들이 살아있는지 체크(Heartbeat)하고, 어떤 컨슈머가 어떤 파티션을 읽을지 할당(Rebalancing)해주는 브로커입니다. 각 컨슈머 그룹마다 담당 코디네이터 브로커가 지정됩니다.
+
+<br />
 
 ### Kafka Offset
 
