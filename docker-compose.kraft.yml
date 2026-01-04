@@ -19,13 +19,21 @@ x-kafka-broker-environment: &kafka-broker-environment
   KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3 # Kafka Offset을 몇개의 브로커에서 저장할지 지정 (안정성을 위해 브로커 개수만큼 설정)
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3 # Kafka의 트랜잭션 원리에서 Coordinator 장부(__transaction_state)를 몇 개의 브로커에 복제해서 저장할지 결정 (안정성을 위해 브로커 개수만큼 설정)
 
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3 # Debezium이 토픽을 만들 때, 브로커 복제본 개수를 지정하지 않으면 적용하는 값
+
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2 # Kafka 트랜잭션 발송 시, Coordinator가 장부를 기록할 때, 최소 몇 대의 Broker가 '저장 완료'라고 응답해야 하는가를 정하는 기준값 (= Math.floor(브로커 개수/2) + 1)
   KAFKA_MIN_INSYNC_REPLICAS: 2 # Kafka 일반 발송 시, 데이터 유실을 방지하기 위해, 최소 몇 대의 Broker가 '저장 완료'라고 응답해야 하는가를 정하는 기준값 (= Math.floor(브로커 개수/2) + 1)
 
   KAFKA_NUM_PARTITIONS: 3 # 토픽 생성 시 파티션 개수를 명시하지 않았거나 자동 생성될 때 적용되는 파티션 개수의 기본값
   KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # 존재하지 않는 토픽에 메시지를 보냈을 때 브로커가 알아서 토픽을 만들지 결정하는 허용 스위치 (현재는 개발용이기에 true)
   KAFKA_LOG_DIRS: "/tmp/kafka-logs" # Kafka 브로커 별 로그 창고
-  KAFKA_HEAP_OPTS: "-Xms1G -Xmx1G" # Kafka 브로커 별 메모리 용량
+  # KAFKA_HEAP_OPTS: "-Xms1G -Xmx1G" # Kafka 브로커 별 메모리 용량
+
+  # 로컬을 위한 설정값
+  KAFKA_HEAP_OPTS: "-Xms400M -Xmx400M"
+  KAFKA_REPLICA_LAG_TIME_MAX_MS: 60000
+  KAFKA_CONTROLLER_QUORUM_REQUEST_TIMEOUT_MS: 60000
+  KAFKA_REQUEST_TIMEOUT_MS: 60000
 
 x-kafka-broker-base: &kafka-broker-base
   image: confluentinc/cp-kafka:7.6.0
@@ -130,9 +138,9 @@ services:
       CONFIG_STORAGE_TOPIC: kafka-connect-configs # Kafka Connect의 모든 설정 정보를 저장하는 중앙 저장소
       OFFSET_STORAGE_TOPIC: kafka-connect-offsets # Kafka Connect가 읽고 있는 데이터의 위치 정보를 저장
       STATUS_STORAGE_TOPIC: kafka-connect-status # Kafka Connect의 현재 생사 확인 및 상태를 공유
-      CONFIG_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
-      OFFSET_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
-      STATUS_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3 # 데이터 복제를 위한 브로커 복제 수 (= 브로커 수)
       CONNECT_CONFIG_STORAGE_PARTITIONS: 1 # 커넥터의 설정 정보를 저장하는 토픽의 파티션 개수 (설정 변경의 순서 보장을 위해 1로 지정 필수)
       CONNECT_OFFSET_STORAGE_PARTITIONS: 25 # Source Connector가 데이터를 어디까지 읽었는지 Offset을 기록하는 토픽의 파티션 개수 (시스템 토픽 설정을 위해 파티션 수를 별도로 지정)
       CONNECT_STATUS_STORAGE_PARTITIONS: 5 # Connector와 Task들의 상태를 저장하는 토픽의 파티션 개수 (시스템 토픽 설정을 위해 파티션 수를 별도로 지정)
@@ -142,6 +150,30 @@ services:
       CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter # ConnectRecord의 Value(데이터 본문)를 어떤 형태로 직렬화하여 토픽에 저장할지 결정
       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false" # 직렬화된 Key에 스키마 구조 정보(Metadata)를 포함할지 여부
       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false" # 직렬화된 Value에 스키마 구조 정보(Metadata)를 포함할지 여부
+    # Kafka Connect outbox 패턴을 위한 토픽 정의
+    volumes:
+      - ./connectors:/tmp/connectors
+    command: >
+      /bin/bash -c "
+        # 1. 기존 Debezium 실행 스크립트를 백그라운드(&)로 실행
+        sleep 10;
+        /docker-entrypoint.sh start &
+
+        # 2. 서버가 뜰 때까지 내부에서 대기
+        echo 'Kafka Connect wait booting...';
+        while [ $$(curl -s -o /dev/null -w %{http_code} http://localhost:8083/) -ne 200 ]; do 
+          sleep 5;
+        done;
+
+        # 3. Kafka Connect 등록 (outbox-connector.json 사용)
+        echo 'Kafka Connector registering...';
+        curl -v -X POST -H 'Content-Type: application/json' --data @/tmp/connectors/outbox-connector.json http://localhost:8083/connectors;
+
+        # 4. 백그라운드에서 실행 중인 Connect 서버가 꺼지지 않도록 대기
+        echo 'Kafka Connect started!';
+
+        wait
+      "
     networks:
       - kafka-network
 

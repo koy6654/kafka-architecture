@@ -1,0 +1,26 @@
+{
+  "name": "outbox-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "host.docker.internal",
+    "database.port": "5432",
+    "database.user": "koy",
+    "database.dbname": "postgres",
+    "plugin.name": "pgoutput",
+    
+    "table.include.list": "public.kafka_outbox",
+    "topic.prefix": "emotiontree",
+    
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.route.by.field": "topic",
+    "transforms.outbox.route.topic.replacement": "${routedByValue}",
+    "transforms.outbox.table.field.event.payload": "event_payload",
+    "transforms.outbox.table.field.event.key": "aggregate_id",
+    "transforms.outbox.route.topic.partition.by": "aggregate_id",
+    "transforms.outbox.table.fields.additional.placement": "event_type:header:eventType",
+
+    "tombstones.on.delete": "false"
+  }
+}

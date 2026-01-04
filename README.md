@@ -54,7 +54,7 @@ docker compose -f docker-compose.kraft.yml up -d
 
 ## 그 외에 정리한 Kafka 지식들
 
-[![Kafka Reference Image](/assets/kafka_reference_image.png)]()
+[![Kafka Reference Image](/assets/kafka-reference-image.png)]()
 <br> 출처: [Velog 기술 블로그](https://velog.io/@jwpark06/Kafka-%EC%8B%9C%EC%8A%A4%ED%85%9C-%EA%B5%AC%EC%A1%B0-%EC%95%8C%EC%95%84%EB%B3%B4%EA%B8%B0)
 
 <br />
