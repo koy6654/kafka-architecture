@@ -6,7 +6,7 @@
 <br />
 <br />
 
-## 실행 방법
+## 실행
 
 ```
 docker compose -f docker-compose.kraft.yml up -d
@@ -14,7 +14,7 @@ docker compose -f docker-compose.kraft.yml up -d
 
 <br />
 
-## 테스트 방법
+## 테스트
 
 ```
 ./scripts/test.sh
