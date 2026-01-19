@@ -2,7 +2,7 @@
 
 이벤트 중심의 MSA 아키텍처를 위한 Kafka 설계 (For OceansLab)
 
-[관련 포스팅](https://koy-blog.vercel.app/backend/013-kafka-for-msa)
+[관련 포스팅](https://koy-blog.vercel.app/backend/013-nodejs-kafka-for-msa)
 <br />
 <br />
 
